@@ -1,2 +1,4 @@
 selenium
 chromedriver_autoinstaller
+requests
+load_dotenv
