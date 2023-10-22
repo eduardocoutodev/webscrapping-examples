@@ -1,0 +1,30 @@
+name: Cron Job to check price of Macs
+
+on:
+  workflow_dispatch:
+  schedule:
+  # Run everyday at 09:00 AM every day
+  - cron: "0 9 * * *"
+
+jobs:
+  run_python_script:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v3
+
+    - name: Install Script Depedencie
+      run: pip3 install -r requeriments.txt
+
+    - name: Run python script
+      env:
+        NTFY_TOPIC: ${{secrets.NTFY_TOPIC}}
+        NFTY_EMAIL_TO_SEND: ${{secrets.NFTY_EMAIL_TO_SEND}}
+
+      run: python3 check-price-mac.py
+
+
