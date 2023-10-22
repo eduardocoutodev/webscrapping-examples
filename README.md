@@ -6,6 +6,18 @@
 
 # Installation
 
+Create a Python virtual env to make sure that dependencies does not have conflicts to local dependencies.
+
+```bash
+python3 -m venv webscrapping-env
+```
+
+Activate the created virtual env
+
+```bash
+source webscrapping-env/bin/activate
+```
+
 Run the following command to install the dependencies:
 
 ```bash
