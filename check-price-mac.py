@@ -12,7 +12,7 @@ from selenium.common.exceptions import NoSuchElementException
 import re
 
 macbook_urls = [
-    'https://www.apple.com/shop/product/G11C2LL/A/refurbished-133-inch-macbook-pro-apple-m1-chip-with-8‑core-cpu-and-8‑core-gpu-space-gray', 'https://www.apple.com/shop/product/G11B0LL/A/refurbished-133-inch-macbook-pro-apple-m1-chip-with-8‑core-cpu-and-8‑core-gpu-space-gray', 'https://www.apple.com/ie/shop/product/G11C3B/A/refurbished-133-inch-macbook-pro-apple-m1-chip-with-8‑core-cpu-and-8‑core-gpu-space-grey?fnode=7880e9223c8ca882d116353105cf2617f579ddb56b91917897e2b78d51eeb99e012e2b535eaa193793b481d5a20bb63b38b21d7fb05b083c84a52ffda8f8c0a2b589462f851e14eeda6c5e023cdce100', 'https://www.apple.com/ie/shop/product/FPHJ3B/A/refurbished-14-inch-macbook-pro-apple-m2-pro-chip-with-12-core-cpu-and-19-core-gpu-silver?fnode=7880e9223c8ca882d116353105cf2617f579ddb56b91917897e2b78d51eeb99e012e2b535eaa193793b481d5a20bb63b38b21d7fb05b083c84a52ffda8f8c0a2b589462f851e14eeda6c5e023cdce100']
+    'https://www.apple.com/shop/product/G11C2LL/A/refurbished-133-inch-macbook-pro-apple-m1-chip-with-8‑core-cpu-and-8‑core-gpu-space-gray', 'https://www.apple.com/shop/product/G11B0LL/A/refurbished-133-inch-macbook-pro-apple-m1-chip-with-8‑core-cpu-and-8‑core-gpu-space-gray', 'https://www.apple.com/ie/shop/product/G11C3B/A/refurbished-133-inch-macbook-pro-apple-m1-chip-with-8‑core-cpu-and-8‑core-gpu-space-grey']
 
 load_dotenv()
 
@@ -60,6 +60,15 @@ def access_url(url: str, browser):
         current_price = extractPrices(browser.find_element(
             By.CSS_SELECTOR, ".rc-prices-fullprice").text)
 
+        ram_memory = browser.find_element(
+            By.XPATH, '//p[contains(.,"unified memory")]').text
+
+        ssd_memory = browser.find_element(
+            By.XPATH, '//p[contains(.,"SSD")]').text
+
+        screen_inches = browser.find_element(
+            By.XPATH, '//p[contains(.,"inch MacBook Pro")]').text
+
         try:
             previous_price = extractPrices(browser.find_element(
                 By.CSS_SELECTOR, ".rc-prices-currentprice .as-price-previousprice"
@@ -72,7 +81,7 @@ def access_url(url: str, browser):
             discountPercentage = round(
                 float(savings) / float(previous_price), 2) * 100
 
-            message_to_send = f"""Macbook with 16 GB Ram, 512 SSD and 13 inches.
+            message_to_send = f"""Macbook with {ram_memory}, {ssd_memory} and {screen_inches}.
             Current Price: {current_price}
             Old Price: {previous_price}
             Saving: {savings}
@@ -80,30 +89,16 @@ def access_url(url: str, browser):
             Saving percentage: {discountPercentage}%
             Link: {url}"""
 
-            body = json.dumps({
-                "topic": NTFY_TOPIC_NAME,
-                "message": message_to_send,
-                "title": "Macbook New Discount",
-                "actions": [
-                    {
-                        "action": "view",
-                        "label": "Open Macbook Discount",
-                        "url": url,
-                    }
-                ]
-            })
+            title = f"{screen_inches} with discount of {discountPercentage}%"
 
-            headers = {
-                # "Email": NFTY_EMAIL_TO_SEND
-            }
-
-            requests.post("https://ntfy.sh/", data=body, headers=headers)
+            sendMessageToNFTYTopic(title, message_to_send)
 
         except NoSuchElementException:
             print("Element not found")
 
     except Exception as e:
         print(e)
+        sendMessageToNFTYTopic("Error happened on Mac Script", e)
 
 
 def extractPrices(text: str) -> str:
@@ -114,6 +109,21 @@ def extractPrices(text: str) -> str:
         return match.group().replace(",", "")
 
     return ""
+
+
+def sendMessageToNFTYTopic(title: str, message_to_send: str, ):
+    body = json.dumps({
+        "topic": NTFY_TOPIC_NAME,
+        "message": message_to_send,
+        "title": title,
+    })
+
+    headers = {
+        "Email": NFTY_EMAIL_TO_SEND
+    }
+
+    requests.post("https://ntfy.sh/", data=body, headers=headers)
+    print("Sent Request to NTFY with success")
 
 
 if __name__ == "__main__":
