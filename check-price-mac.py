@@ -12,7 +12,7 @@ from selenium.common.exceptions import NoSuchElementException
 import re
 
 macbook_urls = [
-    'https://www.apple.com/shop/product/G11C2LL/A/refurbished-133-inch-macbook-pro-apple-m1-chip-with-8‑core-cpu-and-8‑core-gpu-space-gray', 'https://www.apple.com/shop/product/G11B0LL/A/refurbished-133-inch-macbook-pro-apple-m1-chip-with-8‑core-cpu-and-8‑core-gpu-space-gray', 'https://www.apple.com/ie/shop/product/G11C3B/A/refurbished-133-inch-macbook-pro-apple-m1-chip-with-8‑core-cpu-and-8‑core-gpu-space-grey']
+    'https://www.apple.com/shop/product/G11C2LL/A/refurbished-133-inch-macbook-pro-apple-m1-chip-with-8‑core-cpu-and-8‑core-gpu-space-gray', 'https://www.apple.com/shop/product/G11B0LL/A/refurbished-133-inch-macbook-pro-apple-m1-chip-with-8‑core-cpu-and-8‑core-gpu-space-gray', 'https://www.apple.com/ie/shop/product/G11C3B/A/refurbished-133-inch-macbook-pro-apple-m1-chip-with-8‑core-cpu-and-8‑core-gpu-space-grey','https://www.apple.com/shop/product/FYD82LL/A/refurbished-133-inch-macbook-pro-apple-m1-chip-with-8‑core-cpu-and-8‑core-gpu-space-gray']
 
 load_dotenv()
 
