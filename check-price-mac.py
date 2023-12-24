@@ -54,21 +54,20 @@ def access_url(url: str, browser):
         print(f"Started Url: {url}")
         browser.get(url)
 
-        time.sleep(5)
+        time.sleep(2)
 
         # Get the current price of macbook
         current_price = extractPrices(browser.find_element(
             By.CSS_SELECTOR, ".rc-prices-fullprice").text)
+        
+        overview_pannel_container = browser.find_element(By.CSS_SELECTOR, ".Overview-panel")
 
-        ram_memory = browser.find_element(
+        ram_memory = overview_pannel_container.find_element(
             By.XPATH, '//p[contains(.,"unified memory")]').text
-
-        ssd_memory = browser.find_element(
+        
+        ssd_memory = overview_pannel_container.find_element(
             By.XPATH, '//p[contains(.,"SSD")]').text
-
-        screen_inches = browser.find_element(
-            By.XPATH, '//p[contains(.,"inch MacBook Pro")]').text
-
+        
         try:
             previous_price = extractPrices(browser.find_element(
                 By.CSS_SELECTOR, ".rc-prices-currentprice .as-price-previousprice"
@@ -81,7 +80,7 @@ def access_url(url: str, browser):
             discountPercentage = round(
                 float(savings) / float(previous_price), 2) * 100
 
-            message_to_send = f"""Macbook with {ram_memory}, {ssd_memory} and {screen_inches}.
+            message_to_send = f"""Macbook with {ram_memory}, {ssd_memory}.
             Current Price: {current_price}
             Old Price: {previous_price}
             Saving: {savings}
@@ -89,12 +88,13 @@ def access_url(url: str, browser):
             Saving percentage: {discountPercentage}%
             Link: {url}"""
 
-            title = f"{screen_inches} with discount of {discountPercentage}%"
+            title = f"Macbook with discount of {discountPercentage}%"
+            print(message_to_send)
 
             sendMessageToNFTYTopic(title, message_to_send)
 
         except NoSuchElementException:
-            print("Element not found")
+            print("Previous Price not found, no discount, Skipping")
 
     except Exception as e:
         print(e)
