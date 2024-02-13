@@ -2,7 +2,7 @@
 
 # Requirements
 
--   Python 3.6+
+- Python 3.6+
 
 # Installation
 
@@ -34,4 +34,11 @@ Example:
 
 ```bash
 python3 top-250-imdb.py
+```
+
+# Useful with Playwright
+
+```
+playwright install chromium
+playwright codegen
 ```
