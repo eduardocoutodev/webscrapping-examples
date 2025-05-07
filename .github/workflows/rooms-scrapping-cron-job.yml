@@ -25,5 +25,8 @@ jobs:
         env:
           NTFY_TOPIC: ${{secrets.NTFY_TOPIC}}
           BASE_URL: ${{vars.ROOMS_SCRIPT_BASE_URL}}
+          PROXY_URL: ${{vars.PROXY_URL}}
+          PROXY_USER: ${{vars.PROXY_USER}}
+          PROXY_PASSWORD: ${{secrets.PROXY_PASSWORD}}
 
         run: python3 rooms-scrapping.py

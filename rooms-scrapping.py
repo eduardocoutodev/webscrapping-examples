@@ -19,7 +19,8 @@ headers = {
 }
 
 cookies = {
-    'datadome': '8cO3mfFLxc4bs6cfqO21ZnVXbH~qIuFybYDyB83m50ZUvsIxmHoETod9iQ5zNc2LfMMRKKmexBdCL7mA_Q5HpLRrL6LURM9K1kskv4i~K_OqPJyX9SLAO702hyMiGrln'
+    # TODO This cant be hardcoded since was some kind of TTL, need to find a way to generate this
+    'datadome': 'mnkSP~m2Kh2o6hdzUQbcXKBoY2Jj_gzddAdsiERl~VJmTQlKMZubREmDUJNMCCbbnSQhAkh5H7h01ZNygw3UyFQxh03cHvuB4B8gN8ydjbR9Kd86hkv1qP8L4O~~t2C1'
 }
 
 def get_all_rooms():
@@ -318,8 +319,16 @@ def extract_room_info(soup: BeautifulSoup):
 def make_http_request(path: str): 
     print(f"Requesting: {path}")
     
+    username = os.getenv("PROXY_USER")
+    password = os.getenv("PROXY_PASSWORD")
+    proxy = os.getenv("PROXY_URL")
+    
+    proxies = {
+        "https": ('https://user-%s:%s@%s' % (username, password, proxy))
+    }
+    
     try:
-        response = requests.get(path, headers=headers, cookies=cookies)
+        response = requests.get(path, headers=headers, cookies=cookies, proxies=proxies)
         
         if response.status_code == 200:
             print(f"Request successful: Status code {response.status_code}")
@@ -354,7 +363,6 @@ def main():
     if not rooms or len(rooms) <= 0:
         print("No results fetched, skipping fetching details")
         return
-    
     all_room_details = []
     
     for room in rooms:
