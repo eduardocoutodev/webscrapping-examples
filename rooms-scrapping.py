@@ -328,7 +328,7 @@ def make_http_request(path: str):
     }
     
     try:
-        response = requests.get(path, headers=headers, cookies=cookies, proxies=proxies)
+        response = requests.get(path, headers=headers, cookies=cookies, proxies=proxies, verify=False)
         
         if response.status_code == 200:
             print(f"Request successful: Status code {response.status_code}")

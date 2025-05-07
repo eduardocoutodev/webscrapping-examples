@@ -18,7 +18,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v3
 
-      - name: Install Script Depedencie
+      - name: Install Script Requirements
         run: pip3 install -r requirements.txt
 
       - name: Run python script
