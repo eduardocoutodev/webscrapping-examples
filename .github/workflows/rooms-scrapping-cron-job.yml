@@ -19,7 +19,7 @@ jobs:
         uses: actions/setup-python@v3
 
       - name: Install Script Depedencie
-        run: pip3 install -r requeriments.txt
+        run: pip3 install -r requirements.txt
 
       - name: Run python script
         env:
