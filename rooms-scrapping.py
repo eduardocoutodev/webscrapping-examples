@@ -5,8 +5,9 @@ import requests
 from bs4 import BeautifulSoup
 import time
 import json
+from dotenv import load_dotenv
 
-base_url = "https://www.idealista.pt"
+base_url = ""
 max_price = 350
 
 headers = {
@@ -14,7 +15,6 @@ headers = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.5',
     'Accept-Encoding': 'gzip, deflate, br, zstd',
-    'Referer': 'https://www.idealista.pt/arrendar-quarto/braga/guimaraes/centro-da-cidade/com-genero_rapariga/',
     'Connection': 'keep-alive',
 }
 
@@ -91,23 +91,23 @@ def extract_room_info(soup: BeautifulSoup):
                 try:
                     data = json.loads(json_str)
                     ad_data = data.get("ad", {})
-                    room_info['idealista_id_from_data'] = ad_data.get('id')
-                    room_info['price_from_data'] = ad_data.get('price')
-                    room_info['typology_from_data'] = ad_data.get('typology') # e.g., '7' for room
+                    room_info['id'] = ad_data.get('id')
+                    room_info['price'] = ad_data.get('price')
+                    room_info['typology'] = ad_data.get('typology') # e.g., '7' for room
                     
                     characteristics = ad_data.get('characteristics', {})
-                    room_info['total_rooms_in_flat_from_data'] = characteristics.get('roomNumber')
-                    room_info['total_bathrooms_in_flat_from_data'] = characteristics.get('bathNumber')
-                    room_info['has_lift_from_data'] = True if characteristics.get('hasLift') == "1" else (False if characteristics.get('hasLift') == "0" else None)
-                    room_info['constructed_area_m2_from_data'] = characteristics.get('constructedArea')
+                    room_info['total_rooms_in_flat'] = characteristics.get('roomNumber')
+                    room_info['total_bathrooms_in_flat'] = characteristics.get('bathNumber')
+                    room_info['has_lift'] = True if characteristics.get('hasLift') == "1" else (False if characteristics.get('hasLift') == "0" else None)
+                    room_info['constructed_area_m2'] = characteristics.get('constructedArea')
                     
                     media = ad_data.get('media', {})
-                    room_info['num_photos_from_data'] = media.get('photoNumber')
+                    room_info['num_photos'] = media.get('photoNumber')
                     
                     owner = ad_data.get('owner', {})
-                    room_info['owner_type_from_data'] = owner.get('type') # '1' usually private, '2' professional/agency
-                    room_info['owner_commercial_name_from_data'] = owner.get('commercialName')
-                    room_info['chat_is_active_from_data'] = True if owner.get('chatIsActive') == "1" else False
+                    room_info['owner_type'] = owner.get('type') # '1' usually private, '2' professional/agency
+                    room_info['owner_commercial_name'] = owner.get('commercialName')
+                    room_info['chat_is_active'] = True if owner.get('chatIsActive') == "1" else False
 
                 except json.JSONDecodeError as e:
                     print(f"Error decoding utag_data JSON: {e}")
@@ -195,14 +195,14 @@ def extract_room_info(soup: BeautifulSoup):
 
         # --- Advertiser Name ---
         # Prefer commercial name from utag_data if it's an agency
-        if room_info.get('owner_type_from_data') == '2' and room_info.get('owner_commercial_name_from_data'):
-            room_info['advertiser_name'] = room_info['owner_commercial_name_from_data']
+        if room_info.get('owner_type') == '2' and room_info.get('owner_commercial_name'):
+            room_info['advertiser_name'] = room_info['owner_commercial_name']
         else:
             chat_banner_advertiser = soup.select_one(".chat-info-banner-text strong")
             if chat_banner_advertiser:
                 room_info['advertiser_name'] = chat_banner_advertiser.get_text(strip=True)
             # Fallback if still no name and it's a private owner from utag_data
-            elif room_info.get('owner_type_from_data') == '1' and not room_info.get('advertiser_name'):
+            elif room_info.get('owner_type') == '1' and not room_info.get('advertiser_name'):
                 room_info['advertiser_name'] = "Particular" # Generic for private owner
 
         # --- Property Description ---
@@ -245,7 +245,7 @@ def extract_room_info(soup: BeautifulSoup):
                 room_info['image_urls'].append(url)
         
         # Gallery images (often loaded via JS, but sometimes a few are in data attributes or script tags)
-        # For now, we have num_photos_from_data. A full gallery scrape would be more involved.
+        # For now, we have num_photos. A full gallery scrape would be more involved.
         # Example: Extract from multimedia JSON if present
         gallery_script = soup.find('script', string=re.compile(r'initialMultimediaData', re.I))
         if gallery_script:
@@ -257,7 +257,6 @@ def extract_room_info(soup: BeautifulSoup):
                     for item in gallery_data:
                         if item.get('type') == 'IMAGE' and item.get('url'):
                             img_url = item['url']
-                             # Idealista sometimes uses placeholders like {width}x{height} or {action}
                             img_url = re.sub(r'{.*?}', 'WEB_DETAIL', img_url) # Replace placeholder with a common size/action
                             if img_url not in room_info['image_urls']:
                                 room_info['image_urls'].append(img_url)
@@ -333,8 +332,22 @@ def make_http_request(path: str):
     except Exception as e:
         print(f"Exception occurred: {e}")
         return None
+    
+def sendMessageToNFTYTopic(topic_name:str, title: str, message_to_send: str, ):
+    body = json.dumps({
+        "topic": topic_name,
+        "message": message_to_send,
+        "title": title,
+    })
+
+    requests.post("https://ntfy.sh/", data=body, headers=headers)
+    print("Sent Request to NTFY with success")
 
 def main():
+    load_dotenv()
+    global base_url
+    base_url = os.getenv('BASE_URL')
+    
     print("Getting all rooms")
     rooms = get_all_rooms()
     
@@ -342,8 +355,6 @@ def main():
         print("No results fetched, skipping fetching details")
         return
     
-    # TODO For now trimming to only 2 results, to not get rate limmited
-    rooms = rooms[:2]
     all_room_details = []
     
     for room in rooms:
@@ -362,13 +373,17 @@ def main():
     if len(all_room_details) > 0:
         # Create a timestamp for the filename
         current_time = datetime.datetime.now()
-        timestamp = current_time.strftime("%d-%m-%y-%H-%M-%S")
+        timestamp = current_time.strftime("%Y-%m-%d @ %H-%M-%S")
         filename = f"results/room-details-{timestamp}.json"
         
         os.makedirs("results", exist_ok=True)
         
         with open(filename, "w", encoding="utf-8") as file:
             json.dump(all_room_details, file, indent=4, ensure_ascii=False)
+            
+    ntfy_topic_name = os.getenv('NTFY_TOPIC')
+    sendMessageToNFTYTopic(ntfy_topic_name, "Rooms Scrapping Job", "Job ended with success, check the results")
+    
 
 if __name__ == "__main__":
     main()

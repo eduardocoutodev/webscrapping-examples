@@ -1,0 +1,29 @@
+name: Cron Job to scrape rooms pricing
+
+on:
+  workflow_dispatch:
+  # Uncomment following lines to run Daily Cron Job
+  schedule:
+    # Run everyday at 08:00 AM every day
+    - cron: "0 8 * * *"
+
+jobs:
+  run_python_script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v3
+
+      - name: Install Script Depedencie
+        run: pip3 install -r requeriments.txt
+
+      - name: Run python script
+        env:
+          NTFY_TOPIC: ${{secrets.NTFY_TOPIC}}
+          BASE_URL: ${{vars.ROOMS_SCRIPT_BASE_URL}}
+
+        run: python3 rooms-scrapping.py
