@@ -1,0 +1,116 @@
+{
+  "meta": {
+    "prd": "Local PS5 Deal Monitor",
+    "branch": "codex/local-ps5-deal-monitor"
+  },
+  "feature": "Local PS5 Deal Monitor",
+  "generated": "2026-08-30",
+  "prd": "plan/PRD.md",
+  "tickets": [
+    {
+      "id": "F-1",
+      "title": "Add configuration and SQLite notification state",
+      "phase": "Foundation",
+      "blocked_by": [],
+      "scope": "M",
+      "status": "ready-for-review",
+      "requirements": [
+        "Load and validate NTFY_TOPIC, MIN_PRICE_EUR, MAX_PRICE_EUR, MAX_DISTANCE_KM, and STATE_DB_PATH with PRD defaults.",
+        "Create and reuse SQLite notification state without silently resetting corrupt databases.",
+        "Read notified IDs and persist new IDs transactionally and idempotently.",
+        "Ignore local environment, SQLite, cache, and macOS metadata files."
+      ],
+      "acceptance_criteria": [
+        "Configuration defaults, overrides, and invalid values are unit tested.",
+        "Schema creation, reopened persistence, idempotency, and corrupt database failure are unit tested.",
+        "The complete unittest suite passes."
+      ],
+      "files_affected": [
+        "ps5_monitor.py",
+        "tests/test_ps5_monitor.py",
+        ".gitignore"
+      ]
+    },
+    {
+      "id": "CB-1",
+      "title": "Implement strict listing classification, distance, and ranking",
+      "phase": "Core Backend",
+      "blocked_by": [
+        "F-1"
+      ],
+      "scope": "M",
+      "status": "ready-for-review",
+      "requirements": [
+        "Normalize listing text and strictly require PS5, Slim, and disc-edition identity.",
+        "Reject digital-only, accessory, game-only, wanted, repair, damaged, and parts listings.",
+        "Apply active-status, EUR, price, approximate Haversine distance, notified-ID, and deterministic ranking rules.",
+        "Skip malformed listings with warnings."
+      ],
+      "acceptance_criteria": [
+        "Positive wording and all rejection categories are unit tested.",
+        "Price and distance boundaries are unit tested.",
+        "Malformed data, duplicate exclusion, and deterministic ordering are unit tested.",
+        "The complete unittest suite passes."
+      ],
+      "files_affected": [
+        "ps5_monitor.py",
+        "tests/test_ps5_monitor.py"
+      ]
+    },
+    {
+      "id": "I-1",
+      "title": "Add the anonymous OLX GraphQL client and response parser",
+      "phase": "Integration",
+      "blocked_by": [
+        "CB-1"
+      ],
+      "scope": "M",
+      "status": "ready-for-review",
+      "requirements": [
+        "Send the verified minimal anonymous GraphQL request with explicit timeout and no credentials.",
+        "Request 40 listings per page up to the configured unique-result limit, using configured price bounds and deduplicating listing IDs.",
+        "Validate the full response envelope and fail closed on transport or GraphQL errors.",
+        "Parse typed listing fields while skipping malformed individual items with warnings."
+      ],
+      "acceptance_criteria": [
+        "A representative successful response is parsed in unit tests.",
+        "Tests assert the request has no authorization, cookies, or seller/contact fields.",
+        "All transport and response-envelope failures are unit tested.",
+        "The complete unittest suite passes without live network access."
+      ],
+      "files_affected": [
+        "ps5_monitor.py",
+        "tests/test_ps5_monitor.py"
+      ]
+    },
+    {
+      "id": "I-2",
+      "title": "Add ntfy delivery, one-shot orchestration, and server instructions",
+      "phase": "Integration",
+      "blocked_by": [
+        "I-1"
+      ],
+      "scope": "L",
+      "status": "ready-for-review",
+      "requirements": [
+        "Publish one ntfy message with at most three ranked deals and one view action per deal.",
+        "Remain silent when no unseen match exists and persist IDs only after successful publication.",
+        "Implement stdout, stderr, and process exit behavior for all completed and failed checks.",
+        "Document installation, configuration, testing, one-shot execution, state, privacy, and non-overlapping server scheduling."
+      ],
+      "acceptance_criteria": [
+        "Payload, no-match, all-notified, excess-match, first-run, and failure flows are unit tested.",
+        "Tests prove state changes only after successful publication.",
+        "CLI exit behavior is tested without live network access.",
+        "README instructions cover installation through scheduled operation.",
+        "The complete unittest suite passes."
+      ],
+      "files_affected": [
+        "ps5_monitor.py",
+        "tests/test_ps5_monitor.py",
+        "README.md",
+        "requirements.txt"
+      ]
+    }
+  ]
+}
