@@ -1,5 +1,8 @@
-.venv
-
-webscrapping-env/
-
+.DS_Store
 .env
+__pycache__/
+*.py[cod]
+.venv/
+webscrapping-env/
+*.sqlite3
+*.sqlite3-*
