@@ -1,5 +1,5 @@
 selenium
 chromedriver_autoinstaller
 requests
-load_dotenv
+python-dotenv
 bs4

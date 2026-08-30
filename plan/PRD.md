@@ -86,7 +86,7 @@ Each invocation follows this flow:
 
 1. Load and validate environment configuration.
 2. Open the local SQLite state database and ensure its schema exists.
-3. Send one anonymous GraphQL search request to OLX.
+3. Send paginated anonymous GraphQL search requests to OLX.
 4. Validate the response, parse listings, apply strict classification and numeric filters, and exclude notified IDs.
 5. Rank unseen matches and select at most three.
 6. If the selection is empty, log a short success result and exit `0` without contacting ntfy.
@@ -103,6 +103,7 @@ The process is single-user and is expected to have at most one active invocation
 | `MIN_PRICE_EUR` | No | `200` | Inclusive minimum listing price |
 | `MAX_PRICE_EUR` | No | `300` | Exclusive maximum listing price |
 | `MAX_DISTANCE_KM` | No | `80` | Inclusive approximate straight-line distance |
+| `OLX_MAX_RESULTS` | No | `200` | Maximum unique results to inspect, from 1 through 300 |
 | `STATE_DB_PATH` | No | Local application data path | SQLite state database location |
 
 Numeric configuration must be finite and non-negative, and the minimum price must be lower than the maximum price. Configuration errors fail before any external request.
@@ -125,7 +126,8 @@ No seller details, listing descriptions, URLs, coordinates, cookies, or credenti
 - Method: `POST`
 - Endpoint: `https://www.olx.pt/apigateway/graphql`
 - Authentication: none
-- Search: newest `playstation 5` listings in the €200–€350 server-side range
+- Search: newest `playstation 5` listings using the configured price range
+- Pagination: OLX accepts 40 results per request; request successive offsets until the configured unique-result limit or the end of results
 - Required fields: ID, title, description, URL, creation time, status, locality, approximate map coordinates, and typed parameters for price/model/state
 
 The client accepts only HTTP `200`, valid JSON without top-level GraphQL errors, the `ListingSuccess` union member, and a list-valued listing collection. The GraphQL selection set excludes seller contact and account fields.
@@ -163,7 +165,7 @@ There are no database migrations or backfills for the first release. An absent d
 ## 6. Non-Functional Requirements
 
 - **Performance:** One invocation should normally finish within 30 seconds; all external calls use explicit timeouts.
-- **Scale:** One user, one request every 15 minutes, at most 40 OLX results evaluated per run, and at most three listings per notification.
+- **Scale:** One user, one scheduled run every 15 minutes, up to five OLX requests and 200 unique results by default (maximum eight requests and 300 results), and at most three listings per notification.
 - **Privacy:** Do not store or log OLX tokens, cookies, seller details, or precise personal information. The owner explicitly accepts the public `eduardo_notifications` topic.
 - **Observability:** Log one concise summary to stdout on success. Send warnings and failures to stderr. Exit `0` only for completed checks, including checks with no matches.
 - **Resilience:** Never update notified state after failed OLX retrieval or failed ntfy publication. Never silently recreate a corrupt database.

@@ -86,7 +86,7 @@ Retrieve the newest OLX search results with the verified minimal anonymous Graph
 **Requirements**:
 
 1. Send one JSON `POST` to `https://www.olx.pt/apigateway/graphql` with explicit timeout, JSON content type, stable user agent, and no authentication or cookies.
-2. Request at most 40 newest `playstation 5` results with the verified €200–€350 server-side price parameters.
+2. Request 40 results per page with successive offsets until the configured unique-result limit, using the configured price bounds and deduplicating listing IDs.
 3. Limit the GraphQL selection set to the fields required by the PRD.
 4. Accept only HTTP `200`, valid JSON without top-level GraphQL errors, `ListingSuccess`, and a list-valued listing collection.
 5. Parse price and other typed parameters by key and GraphQL typename.
@@ -100,7 +100,7 @@ Retrieve the newest OLX search results with the verified minimal anonymous Graph
 
 **Acceptance Criteria**:
 
-- [ ] A representative `ListingSuccess` response parses into domain values in unit tests.
+- [ ] Representative single-page and paginated `ListingSuccess` responses parse and deduplicate correctly in unit tests.
 - [ ] Tests assert that the request contains no authorization or cookie headers and excludes seller/contact fields.
 - [ ] Timeout, non-`200`, invalid JSON, GraphQL errors, `ListingError`, and malformed collection cases fail closed in unit tests.
 - [ ] One malformed item is skipped without discarding valid siblings.

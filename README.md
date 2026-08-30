@@ -13,20 +13,31 @@ Python 3.9 or newer is required.
 ```bash
 python3 -m venv webscrapping-env
 source webscrapping-env/bin/activate
-pip install requests
+pip install requests python-dotenv
 ```
 
 ### Configure
 
-All values are optional; these are the defaults:
+Copy the example file, then edit `.env`. The script loads it automatically:
 
 ```bash
-export NTFY_TOPIC=eduardo_notifications
-export MIN_PRICE_EUR=200
-export MAX_PRICE_EUR=300
-export MAX_DISTANCE_KM=80
-export STATE_DB_PATH=ps5_monitor.sqlite3
+cp .env.example .env
 ```
+
+The monitor settings and defaults are:
+
+```dotenv
+NTFY_TOPIC=eduardo_notifications
+MIN_PRICE_EUR=200
+MAX_PRICE_EUR=300
+MAX_DISTANCE_KM=80
+OLX_MAX_RESULTS=200
+STATE_DB_PATH=ps5_monitor.sqlite3
+```
+
+OLX accepts no more than 40 results per request. `OLX_MAX_RESULTS=200` therefore makes five paginated requests and deduplicates promoted listings returned on multiple pages. Values from 1 through 300 are accepted; 200 is the recommended balance for a 15-minute schedule.
+
+`MIN_PRICE_EUR` and `MAX_PRICE_EUR` now control both the OLX query and the stricter local filter. The maximum remains exclusive locally, so `MAX_PRICE_EUR=400` accepts prices below €400.
 
 `eduardo_notifications` is a public, guessable ntfy topic. Anyone who knows it can read or publish messages. Use a hard-to-guess topic if this becomes a concern.
 
@@ -59,7 +70,7 @@ sudo install -d -o "$USER" -g "$USER" /var/lib/ps5-monitor
 Add this entry with `crontab -e`, replacing `/srv/webscrapping-examples` with the repository path:
 
 ```cron
-*/15 * * * * cd /srv/webscrapping-examples && NTFY_TOPIC=eduardo_notifications STATE_DB_PATH=/var/lib/ps5-monitor/state.sqlite3 /usr/bin/flock -n /tmp/ps5-monitor.lock webscrapping-env/bin/python ps5_monitor.py >> ps5_monitor.log 2>&1
+*/15 * * * * cd /srv/webscrapping-examples && STATE_DB_PATH=/var/lib/ps5-monitor/state.sqlite3 /usr/bin/flock -n /tmp/ps5-monitor.lock webscrapping-env/bin/python ps5_monitor.py >> ps5_monitor.log 2>&1
 ```
 
 `flock` prevents overlapping invocations. The script has bounded HTTP timeouts and does not contain its own polling loop.

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 import requests
+from dotenv import load_dotenv
 
 OLX_GRAPHQL_URL = "https://www.olx.pt/apigateway/graphql"
 NTFY_URL = "https://ntfy.sh/"
@@ -61,14 +62,8 @@ query ListingSearchQuery($searchParameters: [SearchParameter!] = []) {
 }
 """.strip()
 
-OLX_SEARCH_PARAMETERS = [
-    {"key": "offset", "value": "0"},
-    {"key": "limit", "value": "40"},
-    {"key": "query", "value": "playstation 5"},
-    {"key": "sort_by", "value": "created_at:desc"},
-    {"key": "filter_float_price:from", "value": "200"},
-    {"key": "filter_float_price:to", "value": "350"},
-]
+OLX_PAGE_SIZE = 40
+MAX_OLX_RESULTS_LIMIT = 300
 
 PS5_PATTERN = re.compile(r"\b(?:ps\s*5|play\s*station\s*5|playstation\s*5)\b")
 SLIM_PATTERN = re.compile(r"\bslim\b")
@@ -122,6 +117,7 @@ class Config:
     max_price_eur: float
     max_distance_km: float
     state_db_path: Path
+    olx_max_results: int = 200
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Config:
@@ -137,9 +133,14 @@ class Config:
         min_price = _read_number(values, "MIN_PRICE_EUR", 200.0)
         max_price = _read_number(values, "MAX_PRICE_EUR", 300.0)
         max_distance = _read_number(values, "MAX_DISTANCE_KM", 80.0)
+        max_results = _read_integer(values, "OLX_MAX_RESULTS", 200)
 
         if min_price >= max_price:
             raise ConfigurationError("MIN_PRICE_EUR must be lower than MAX_PRICE_EUR")
+        if not 1 <= max_results <= MAX_OLX_RESULTS_LIMIT:
+            raise ConfigurationError(
+                f"OLX_MAX_RESULTS must be between 1 and {MAX_OLX_RESULTS_LIMIT}"
+            )
 
         return cls(
             ntfy_topic=topic,
@@ -147,6 +148,7 @@ class Config:
             max_price_eur=max_price,
             max_distance_km=max_distance,
             state_db_path=Path(state_path),
+            olx_max_results=max_results,
         )
 
 
@@ -236,6 +238,16 @@ def _read_number(values: Mapping[str, str], name: str, default: float) -> float:
     return value
 
 
+def _read_integer(values: Mapping[str, str], name: str, default: int) -> int:
+    raw_value = values.get(name)
+    if raw_value is None:
+        return default
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"{name} must be an integer") from exc
+
+
 def normalize_text(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value)
     without_diacritics = "".join(
@@ -320,16 +332,79 @@ def select_deals(
     )
 
 
-def fetch_olx_listings(http_client: Any = requests) -> tuple[list[Listing], list[str]]:
-    payload = {
-        "query": OLX_QUERY,
-        "variables": {"searchParameters": OLX_SEARCH_PARAMETERS},
-    }
+def fetch_olx_listings(
+    http_client: Any = requests,
+    *,
+    max_results: int = 200,
+    min_price_eur: float = 200,
+    max_price_eur: float = 300,
+) -> tuple[list[Listing], list[str]]:
+    if not 1 <= max_results <= MAX_OLX_RESULTS_LIMIT:
+        raise ConfigurationError(
+            f"OLX_MAX_RESULTS must be between 1 and {MAX_OLX_RESULTS_LIMIT}"
+        )
+
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (compatible; LocalPS5DealMonitor/1.0)",
     }
+    listings: list[Listing] = []
+    warnings: list[str] = []
+    seen_ids: set[str] = set()
+
+    for offset in range(0, max_results, OLX_PAGE_SIZE):
+        payload = {
+            "query": OLX_QUERY,
+            "variables": {
+                "searchParameters": _olx_search_parameters(
+                    offset, min_price_eur, max_price_eur
+                )
+            },
+        }
+        raw_listings = _fetch_olx_page(http_client, payload, headers)
+        for index, raw_listing in enumerate(raw_listings):
+            try:
+                listing = _parse_listing(raw_listing)
+            except (TypeError, ValueError) as exc:
+                identifier = (
+                    raw_listing.get("id") if isinstance(raw_listing, dict) else None
+                )
+                label = (
+                    f"listing {identifier}"
+                    if identifier is not None
+                    else f"item {offset + index}"
+                )
+                warnings.append(f"Skipping malformed OLX {label}: {exc}")
+                continue
+            if listing.listing_id in seen_ids:
+                continue
+            seen_ids.add(listing.listing_id)
+            listings.append(listing)
+            if len(listings) == max_results:
+                break
+
+        if len(listings) == max_results or len(raw_listings) < OLX_PAGE_SIZE:
+            break
+    return listings, warnings
+
+
+def _olx_search_parameters(
+    offset: int, min_price_eur: float, max_price_eur: float
+) -> list[dict[str, str]]:
+    return [
+        {"key": "offset", "value": str(offset)},
+        {"key": "limit", "value": str(OLX_PAGE_SIZE)},
+        {"key": "query", "value": "playstation 5"},
+        {"key": "sort_by", "value": "created_at:desc"},
+        {"key": "filter_float_price:from", "value": f"{min_price_eur:g}"},
+        {"key": "filter_float_price:to", "value": f"{max_price_eur:g}"},
+    ]
+
+
+def _fetch_olx_page(
+    http_client: Any, payload: dict[str, Any], headers: dict[str, str]
+) -> list[dict[str, Any]]:
     try:
         response = http_client.post(
             OLX_GRAPHQL_URL,
@@ -346,22 +421,7 @@ def fetch_olx_listings(http_client: Any = requests) -> tuple[list[Listing], list
         body = response.json()
     except (TypeError, ValueError) as exc:
         raise RetrievalError("OLX returned invalid JSON") from exc
-
-    raw_listings = _validate_olx_response(body)
-    listings: list[Listing] = []
-    warnings: list[str] = []
-    for index, raw_listing in enumerate(raw_listings[:40]):
-        try:
-            listings.append(_parse_listing(raw_listing))
-        except (TypeError, ValueError) as exc:
-            identifier = (
-                raw_listing.get("id") if isinstance(raw_listing, dict) else None
-            )
-            label = (
-                f"listing {identifier}" if identifier is not None else f"item {index}"
-            )
-            warnings.append(f"Skipping malformed OLX {label}: {exc}")
-    return listings, warnings
+    return _validate_olx_response(body)
 
 
 def _validate_olx_response(body: Any) -> list[dict[str, Any]]:
@@ -553,7 +613,12 @@ def run(
         active_store.initialize()
 
         notified_ids = active_store.notified_ids()
-        listings, warnings = fetch_olx_listings(http_client)
+        listings, warnings = fetch_olx_listings(
+            http_client,
+            max_results=active_config.olx_max_results,
+            min_price_eur=active_config.min_price_eur,
+            max_price_eur=active_config.max_price_eur,
+        )
         for warning in warnings:
             print(f"Warning: {warning}", file=stderr)
 
@@ -579,6 +644,7 @@ def run(
 
 
 def main() -> int:
+    load_dotenv()
     return run()
 
 

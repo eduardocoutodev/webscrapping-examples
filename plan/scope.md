@@ -24,7 +24,7 @@ Running the monitor continuously produces a notification on the `eduardo_notific
 
 ## In Scope
 
-- Query OLX for recent PlayStation 5 listings in the supplied €200–€350 search range.
+- Query OLX for recent PlayStation 5 listings using the configured price range.
 - Apply stricter local filters for price, model, listing type, and distance.
 - Send the top three unseen qualifying results in one readable ntfy message.
 - Support execution every 15 minutes by an external scheduler and retain notified IDs in SQLite across runs.

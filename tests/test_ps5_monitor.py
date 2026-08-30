@@ -133,6 +133,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(parsed.max_price_eur, 300.0)
         self.assertEqual(parsed.max_distance_km, 80.0)
         self.assertEqual(parsed.state_db_path, Path("ps5_monitor.sqlite3"))
+        self.assertEqual(parsed.olx_max_results, 200)
 
     def test_overrides(self):
         parsed = ps5_monitor.Config.from_env(
@@ -142,6 +143,7 @@ class ConfigTests(unittest.TestCase):
                 "MAX_PRICE_EUR": "299",
                 "MAX_DISTANCE_KM": "42",
                 "STATE_DB_PATH": "/tmp/monitor.sqlite3",
+                "OLX_MAX_RESULTS": "250",
             }
         )
 
@@ -150,6 +152,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(parsed.max_price_eur, 299.0)
         self.assertEqual(parsed.max_distance_km, 42.0)
         self.assertEqual(parsed.state_db_path, Path("/tmp/monitor.sqlite3"))
+        self.assertEqual(parsed.olx_max_results, 250)
 
     def test_invalid_values(self):
         invalid_environments = [
@@ -159,6 +162,9 @@ class ConfigTests(unittest.TestCase):
             {"MIN_PRICE_EUR": "nan"},
             {"MAX_PRICE_EUR": "-1"},
             {"MAX_DISTANCE_KM": "inf"},
+            {"OLX_MAX_RESULTS": "not-an-integer"},
+            {"OLX_MAX_RESULTS": "0"},
+            {"OLX_MAX_RESULTS": "301"},
             {"MIN_PRICE_EUR": "300", "MAX_PRICE_EUR": "300"},
         ]
         for environment in invalid_environments:
@@ -292,6 +298,13 @@ class OlxClientTests(unittest.TestCase):
         self.assertNotIn("contact", query)
         self.assertNotIn("user {", query)
         self.assertNotIn("phone", query)
+        parameters = {
+            item["key"]: item["value"]
+            for item in kwargs["json"]["variables"]["searchParameters"]
+        }
+        self.assertEqual(parameters["limit"], "40")
+        self.assertEqual(parameters["filter_float_price:from"], "200")
+        self.assertEqual(parameters["filter_float_price:to"], "300")
 
     def test_malformed_item_is_skipped_but_valid_sibling_remains(self):
         client = FakeHTTPClient(
@@ -317,11 +330,40 @@ class OlxClientTests(unittest.TestCase):
         items = [raw_listing(listing_id=index) for index in range(45)]
         client = FakeHTTPClient(FakeResponse(json_data=success_body(items)))
 
-        listings, warnings = ps5_monitor.fetch_olx_listings(client)
+        listings, warnings = ps5_monitor.fetch_olx_listings(client, max_results=40)
 
         self.assertEqual(warnings, [])
         self.assertEqual(len(listings), 40)
         self.assertEqual(listings[-1].listing_id, "39")
+
+    def test_paginates_in_forty_item_requests_and_deduplicates(self):
+        first_page = [raw_listing(listing_id=index) for index in range(45)]
+        second_page = [raw_listing(listing_id=index) for index in range(40, 85)]
+        client = FakeHTTPClient(
+            FakeResponse(json_data=success_body(first_page)),
+            FakeResponse(json_data=success_body(second_page)),
+        )
+
+        listings, warnings = ps5_monitor.fetch_olx_listings(
+            client,
+            max_results=80,
+            min_price_eur=225,
+            max_price_eur=425,
+        )
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(len(listings), 80)
+        offsets = []
+        for _, kwargs in client.calls:
+            parameters = {
+                item["key"]: item["value"]
+                for item in kwargs["json"]["variables"]["searchParameters"]
+            }
+            offsets.append(parameters["offset"])
+            self.assertEqual(parameters["limit"], "40")
+            self.assertEqual(parameters["filter_float_price:from"], "225")
+            self.assertEqual(parameters["filter_float_price:to"], "425")
+        self.assertEqual(offsets, ["0", "40"])
 
     def test_transport_and_envelope_failures_fail_closed(self):
         cases = [
@@ -515,8 +557,12 @@ class OrchestrationTests(unittest.TestCase):
         self.assertIn("MIN_PRICE_EUR must be a number", stderr.getvalue())
 
     def test_main_returns_run_exit_code(self):
-        with mock.patch("ps5_monitor.run", return_value=7):
+        with (
+            mock.patch("ps5_monitor.load_dotenv") as load_dotenv,
+            mock.patch("ps5_monitor.run", return_value=7),
+        ):
             self.assertEqual(ps5_monitor.main(), 7)
+        load_dotenv.assert_called_once_with()
 
 
 if __name__ == "__main__":

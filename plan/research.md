@@ -37,11 +37,13 @@ Verified search parameters:
 | Key | Value for this monitor |
 |---|---|
 | `offset` | `0` |
-| `limit` | `40` |
+| `limit` | `40` per request |
 | `query` | `playstation 5` |
 | `sort_by` | `created_at:desc` |
-| `filter_float_price:from` | `200` |
-| `filter_float_price:to` | `350` |
+| `filter_float_price:from` | Configured `MIN_PRICE_EUR` (default `200`) |
+| `filter_float_price:to` | Configured `MAX_PRICE_EUR` (default `300`) |
+
+OLX rejected per-request limits of `100`, `200`, and `300` with the `ListingError` union member and error status `400`. To inspect more than 40 results, keep `limit=40` and paginate with `offset=0,40,80,...`. OLX can insert promoted duplicates between pages, so the client must deduplicate by listing ID and cap the final unique collection.
 
 The captured `suggest_filters=true` and `sl=<browser value>` parameters are not needed for listing retrieval and should be omitted. The query selection set should also omit seller contact, account, photo, promotion, delivery, and filter-facet fields because the monitor does not use them.
 

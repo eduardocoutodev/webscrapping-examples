@@ -68,7 +68,7 @@
       "status": "ready-for-review",
       "requirements": [
         "Send the verified minimal anonymous GraphQL request with explicit timeout and no credentials.",
-        "Request at most 40 newest matching listings with the verified search parameters and minimal selection set.",
+        "Request 40 listings per page up to the configured unique-result limit, using configured price bounds and deduplicating listing IDs.",
         "Validate the full response envelope and fail closed on transport or GraphQL errors.",
         "Parse typed listing fields while skipping malformed individual items with warnings."
       ],
