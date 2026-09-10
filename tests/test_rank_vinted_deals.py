@@ -1,15 +1,21 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import requests
 
 from rank_vinted_deals import (
     ListingStore,
+    ai_is_eligible,
     apply_purchase_rules,
+    build_ntfy_payload,
     classify_disc_console,
     deal_for,
     estimate_run_max_cost,
     extract_seller_profile,
+    llm_hard_rejects,
+    notify_new_deals,
     rank_candidates,
     seller_is_eligible,
 )
@@ -31,6 +37,14 @@ class DiscConsoleTests(unittest.TestCase):
 
         self.assertIsNone(classify_disc_console(item))
         self.assertIsNone(classify_disc_console({"title": "PS5 sem disco"}))
+
+    def test_western_digital_brand_does_not_mean_digital_console(self) -> None:
+        item = {
+            "title": "PS5 édition standard (avec lecteur)",
+            "description": "Console avec lecteur et SSD Western Digital",
+        }
+
+        self.assertEqual(classify_disc_console(item), "fat_disc")
 
     def test_recognizes_cfi_model_codes(self) -> None:
         self.assertEqual(classify_disc_console({"title": "PS5 CFI-2016A"}), "slim_disc")
@@ -92,6 +106,91 @@ class SellerProfileTests(unittest.TestCase):
 
         self.assertEqual(result["reviews"], 8)
         self.assertEqual(result["rating"], 4.0)
+
+
+class NtfyTests(unittest.TestCase):
+    @staticmethod
+    def deal(listing_id: int) -> dict:
+        return {
+            "id": listing_id,
+            "title": f"PS5 Slim Disc {listing_id}",
+            "price_eur": 350,
+            "url": f"https://www.vinted.pt/items/{listing_id}",
+            "console_type": "slim_disc",
+            "deal": {"label": "excellent"},
+            "seller": {"rating": 4.5, "reviews": 2},
+        }
+
+    def test_payload_contains_at_most_three_deals(self) -> None:
+        payload = build_ntfy_payload(
+            "eduardo_notifications", [self.deal(index) for index in range(1, 5)]
+        )
+
+        self.assertEqual(payload["topic"], "eduardo_notifications")
+        self.assertEqual(len(payload["actions"]), 3)
+        self.assertNotIn("PS5 Slim Disc 4", payload["message"])
+
+    def test_success_is_persisted_and_not_sent_twice(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = ListingStore(Path(directory) / "test.sqlite3")
+            response = Mock()
+            client = Mock()
+            client.post.return_value = response
+
+            self.assertEqual(
+                notify_new_deals("topic", [self.deal(1)], store, client), 1
+            )
+            self.assertEqual(
+                notify_new_deals("topic", [self.deal(1)], store, client), 0
+            )
+            self.assertEqual(store.notified_ids(), {"1"})
+            client.post.assert_called_once()
+
+    def test_failure_is_not_persisted(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = ListingStore(Path(directory) / "test.sqlite3")
+            response = Mock()
+            response.raise_for_status.side_effect = requests.HTTPError("500")
+            client = Mock()
+            client.post.return_value = response
+
+            with self.assertRaisesRegex(RuntimeError, "ntfy notification failed"):
+                notify_new_deals("topic", [self.deal(1)], store, client)
+
+            self.assertEqual(store.notified_ids(), set())
+
+
+class LlmDecisionTests(unittest.TestCase):
+    def test_confidence_threshold_is_inclusive_at_point_75(self) -> None:
+        decision = {
+            "status": "accepted",
+            "is_desired_ps5": True,
+            "scam_risk": "low",
+            "confidence": 0.75,
+        }
+
+        self.assertTrue(ai_is_eligible(decision))
+        self.assertFalse(ai_is_eligible({**decision, "confidence": 0.749}))
+
+    def test_console_bundle_reason_is_not_mistaken_for_accessory_only(self) -> None:
+        decision = {
+            "status": "accepted",
+            "is_desired_ps5": True,
+            "scam_risk": "low",
+            "reasons": ["Genuine PS5 Disc console with controller and games included"],
+        }
+
+        self.assertFalse(llm_hard_rejects({}, decision))
+
+    def test_controller_only_reason_is_rejected(self) -> None:
+        decision = {
+            "status": "accepted",
+            "is_desired_ps5": True,
+            "scam_risk": "low",
+            "reasons": ["This is a controller-only listing with no console"],
+        }
+
+        self.assertTrue(llm_hard_rejects({}, decision))
 
 
 class ModelBudgetTests(unittest.TestCase):

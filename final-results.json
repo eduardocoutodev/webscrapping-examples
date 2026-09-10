@@ -1,0 +1,22 @@
+{
+  "generated_at": "2026-09-10T22:34:24.757821+00:00",
+  "model": "openai/gpt-5.6-luna",
+  "model_cost_usd": 0.0,
+  "maximum_reserved_cost_usd": 0,
+  "run_cost_limit_usd": 1.5,
+  "rules": {
+    "price_eur": [
+      280.0,
+      400.0
+    ],
+    "console_types": [
+      "slim_disc",
+      "fat_disc"
+    ],
+    "minimum_seller_rating": 3.0,
+    "minimum_seller_reviews": 1,
+    "accepted_ai_confidence": 0.8
+  },
+  "accepted": [],
+  "review": []
+}

@@ -33,7 +33,7 @@ MIN_PRICE_EUR = 280.0
 MAX_PRICE_EUR = 400.0
 MIN_SELLER_RATING = 3.0
 MIN_SELLER_REVIEWS = 1
-AI_CONFIDENCE_THRESHOLD = 0.80
+AI_CONFIDENCE_THRESHOLD = 0.75
 DEFAULT_BATCH_SIZE = 5
 DEFAULT_DATABASE = Path("vinted_deals.sqlite3")
 DEFAULT_MODEL = "openai/gpt-5.6-luna"
@@ -472,6 +472,15 @@ def llm_hard_rejects(item: dict[str, Any], decision: dict[str, Any]) -> bool:
     )
 
 
+def ai_is_eligible(decision: dict[str, Any]) -> bool:
+    return (
+        decision.get("status") == "accepted"
+        and decision.get("is_desired_ps5") is True
+        and decision.get("scam_risk") == "low"
+        and decision.get("confidence", 0) >= AI_CONFIDENCE_THRESHOLD
+    )
+
+
 def collect_candidates(
     store: ListingStore,
     *,
@@ -818,12 +827,7 @@ def rank_candidates(
         if hard_rejected:
             continue
         seller_ok = isinstance(seller, dict) and seller_is_eligible(seller)
-        ai_ok = (
-            decision.get("status") == "accepted"
-            and decision.get("is_desired_ps5") is True
-            and decision.get("scam_risk") == "low"
-            and decision.get("confidence", 0) >= AI_CONFIDENCE_THRESHOLD
-        )
+        ai_ok = ai_is_eligible(decision)
         output = {**item, "ai": decision, "seller_eligible": seller_ok}
         if seller_ok and ai_ok:
             accepted.append(output)
