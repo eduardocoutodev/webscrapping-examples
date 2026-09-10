@@ -26,6 +26,9 @@ from vinted_ps5 import (
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+NTFY_URL = "https://ntfy.sh/"
+HTTP_TIMEOUT = (5, 20)
+MAX_DEALS_PER_NOTIFICATION = 3
 MIN_PRICE_EUR = 280.0
 MAX_PRICE_EUR = 400.0
 MIN_SELLER_RATING = 3.0
@@ -62,7 +65,7 @@ CONTROLLER_PATTERN = re.compile(
     r"\b(?:manette|mando|joypad|controller|comando|dualsense)\b", re.I
 )
 DIGITAL_PATTERN = re.compile(
-    r"\b(?:digital(?: edition)?|version digital|disc[ -]?less|sem (?:leitor|disco)|"
+    r"\b(?:(?<!western )digital(?: edition)?|version digital|disc[ -]?less|sem (?:leitor|disco)|"
     r"sin (?:lector|disco)|sans (?:lecteur|disque)|senza (?:lettore|disco)|"
     r"ohne laufwerk|no disc drive)\b",
     re.I,
@@ -108,7 +111,7 @@ def extract_seller_profile(payload: dict[str, Any]) -> dict[str, Any]:
         return {"seller_id": None, "seller_name": None, "reviews": None, "rating": None}
     rating = user.get("feedback_reputation")
     if isinstance(rating, (int, float)) and 0 <= rating <= 1:
-        rating *= 5
+        rating = round(rating * 5, 1)
     return {
         "seller_id": user.get("id"),
         "seller_name": user.get("login"),
@@ -168,24 +171,45 @@ def seller_is_eligible(seller: dict[str, Any]) -> bool:
     )
 
 
-def apply_purchase_rules(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def apply_purchase_rules(
+    candidates: list[dict[str, Any]], *, report: bool = False
+) -> list[dict[str, Any]]:
     qualified: list[dict[str, Any]] = []
+    rejected = {
+        "invalid/outside budget": 0,
+        "not explicitly Disc": 0,
+        "outside model price limit": 0,
+        "seller below threshold": 0,
+    }
     for item in candidates:
         try:
             price = float(item["price_eur"])
         except (KeyError, TypeError, ValueError):
+            rejected["invalid/outside budget"] += 1
+            continue
+        if not MIN_PRICE_EUR <= price <= MAX_PRICE_EUR:
+            rejected["invalid/outside budget"] += 1
             continue
         console_type = classify_disc_console(item)
-        deal = deal_for(console_type, price) if console_type else None
+        if not console_type:
+            rejected["not explicitly Disc"] += 1
+            continue
+        deal = deal_for(console_type, price)
+        if not deal:
+            rejected["outside model price limit"] += 1
+            continue
         seller = item.get("seller")
-        if not (
-            MIN_PRICE_EUR <= price <= MAX_PRICE_EUR
-            and deal
-            and isinstance(seller, dict)
-            and seller_is_eligible(seller)
-        ):
+        if not isinstance(seller, dict) or not seller_is_eligible(seller):
+            rejected["seller below threshold"] += 1
             continue
         qualified.append({**item, "console_type": console_type, "deal": deal})
+    if report:
+        details = ", ".join(f"{count} {reason}" for reason, count in rejected.items() if count)
+        print(
+            f"Purchase rules: {len(qualified)}/{len(candidates)} kept"
+            + (f" ({details})" if details else ""),
+            file=sys.stderr,
+        )
     return qualified
 
 
@@ -242,6 +266,14 @@ class ListingStore:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notified_vinted_listings (
+                    listing_id TEXT PRIMARY KEY,
+                    notified_at TEXT NOT NULL
+                )
+                """
+            )
 
     def save_catalog(self, item: dict[str, Any], raw_item: dict[str, Any]) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -282,6 +314,27 @@ class ListingStore:
                 (str(listing_id), run_at, json.dumps(decision, ensure_ascii=False)),
             )
 
+    def notified_ids(self) -> set[str]:
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                "SELECT listing_id FROM notified_vinted_listings"
+            ).fetchall()
+        return {row[0] for row in rows}
+
+    def mark_notified(self, listing_ids: list[str]) -> None:
+        unique_ids = list(dict.fromkeys(str(listing_id) for listing_id in listing_ids))
+        if not unique_ids:
+            return
+        notified_at = datetime.now(timezone.utc).isoformat()
+        with sqlite3.connect(self.path) as connection:
+            connection.executemany(
+                """
+                INSERT OR IGNORE INTO notified_vinted_listings (listing_id, notified_at)
+                VALUES (?, ?)
+                """,
+                [(listing_id, notified_at) for listing_id in unique_ids],
+            )
+
     def load_items(self) -> list[dict[str, Any]]:
         with sqlite3.connect(self.path) as connection:
             rows = connection.execute(
@@ -296,7 +349,9 @@ class ListingStore:
         return items
 
 
-def load_candidates(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def load_candidates(
+    raw: list[dict[str, Any]], *, search_max_price: float = MAX_PRICE_EUR
+) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     seen_ids: set[Any] = set()
     for item in raw:
@@ -305,7 +360,7 @@ def load_candidates(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
         except (KeyError, TypeError, ValueError):
             continue
         item_id = item.get("id")
-        if item_id in seen_ids or not MIN_PRICE_EUR <= price <= MAX_PRICE_EUR:
+        if item_id in seen_ids or not MIN_PRICE_EUR <= price <= search_max_price:
             continue
         seller = item.get("seller")
         if isinstance(seller, dict) and isinstance(seller.get("rating"), (int, float)):
@@ -410,7 +465,8 @@ def llm_hard_rejects(item: dict[str, Any], decision: dict[str, Any]) -> bool:
         re.search(
             r"\b(?:bank transfer|virement|bonifico|paypal|revolut|whatsapp|telegram|"
             r"off[- ]platform|outside vinted|avoid vinted|not worth|nintendo|switch|"
-            r"not a ps5|not ps5|game|controller|accessory)\b",
+            r"not a ps5|not ps5|no console|does not include (?:a )?(?:ps5|console)|"
+            r"(?:game|controller|accessory)(?: only| listing))\b",
             reasons,
         )
     )
@@ -422,6 +478,7 @@ def collect_candidates(
     pages: int,
     per_page: int,
     requests_per_minute: int,
+    search_max_price: float = MAX_PRICE_EUR,
 ) -> list[dict[str, Any]]:
     client = VintedClient(requests_per_minute=requests_per_minute)
     raw_candidates: list[dict[str, Any]] = []
@@ -430,7 +487,7 @@ def collect_candidates(
             client,
             search_text="playstation 5",
             price_from=MIN_PRICE_EUR,
-            price_to=MAX_PRICE_EUR,
+            price_to=search_max_price,
             page=page,
             per_page=per_page,
         )
@@ -441,7 +498,7 @@ def collect_candidates(
             raw_candidates.append(item)
         if len(payload["items"]) < per_page:
             break
-    candidates = load_candidates(raw_candidates)
+    candidates = load_candidates(raw_candidates, search_max_price=search_max_price)
     enrich_sellers(candidates, client, store)
     return candidates
 
@@ -481,7 +538,9 @@ def enrich_sellers(
         )
 
 
-def collect_from_file(path: Path, store: ListingStore) -> list[dict[str, Any]]:
+def collect_from_file(
+    path: Path, store: ListingStore, *, search_max_price: float = MAX_PRICE_EUR
+) -> list[dict[str, Any]]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, list):
         raise RuntimeError(f"{path} must contain a JSON list")
@@ -495,7 +554,7 @@ def collect_from_file(path: Path, store: ListingStore) -> list[dict[str, Any]]:
         item["description"] = raw_item.get("description", "")
         store.save_catalog(item, raw_item)
         normalized.append(item)
-    candidates = load_candidates(normalized)
+    candidates = load_candidates(normalized, search_max_price=search_max_price)
     enrich_sellers(candidates, VintedClient(), store)
     return candidates
 
@@ -795,6 +854,74 @@ def rank_candidates(
     }
 
 
+def build_ntfy_payload(topic: str, deals: list[dict[str, Any]]) -> dict[str, Any]:
+    selected = deals[:MAX_DEALS_PER_NOTIFICATION]
+    if not selected:
+        raise ValueError("at least one deal is required")
+    sections = []
+    actions = []
+    for index, deal in enumerate(selected, 1):
+        seller = deal.get("seller", {})
+        console = "Slim Disc" if deal.get("console_type") == "slim_disc" else "Fat Disc"
+        sections.append(
+            "\n".join(
+                [
+                    f"**{index}. {_escape_markdown(str(deal.get('title', 'PS5')))}**",
+                    f"€{float(deal['price_eur']):.0f} · {console} · {deal['deal']['label']}",
+                    f"Seller: {seller.get('rating', '?')}/5 ({seller.get('reviews', '?')} reviews)",
+                    f"[Open on Vinted]({deal['url']})",
+                ]
+            )
+        )
+        actions.append(
+            {
+                "action": "view",
+                "label": f"Open #{index}",
+                "url": deal["url"],
+            }
+        )
+    count = len(selected)
+    return {
+        "topic": topic,
+        "title": f"{count} new accepted Vinted PS5 deal{'s' if count != 1 else ''}",
+        "message": "\n\n".join(sections),
+        "priority": 4,
+        "tags": ["video_game", "moneybag"],
+        "markdown": True,
+        "click": selected[0]["url"],
+        "actions": actions,
+    }
+
+
+def _escape_markdown(value: str) -> str:
+    return re.sub(r"([\\`*_{}\[\]()#+\-.!])", r"\\\1", value)
+
+
+def notify_new_deals(
+    topic: str,
+    accepted: list[dict[str, Any]],
+    store: ListingStore,
+    http_client: Any = requests,
+) -> int:
+    notified = store.notified_ids()
+    selected = [deal for deal in accepted if str(deal["id"]) not in notified][
+        :MAX_DEALS_PER_NOTIFICATION
+    ]
+    if not selected:
+        return 0
+    try:
+        response = http_client.post(
+            NTFY_URL,
+            json=build_ntfy_payload(topic, selected),
+            timeout=HTTP_TIMEOUT,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise RuntimeError(f"ntfy notification failed: {exc}") from exc
+    store.mark_notified([str(deal["id"]) for deal in selected])
+    return len(selected)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", choices=("live", "file", "sqlite"), default="live")
@@ -803,6 +930,15 @@ def main() -> int:
     parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     parser.add_argument("--pages", type=int, default=1)
     parser.add_argument("--per-page", type=int, default=96)
+    parser.add_argument(
+        "--search-max-price",
+        type=float,
+        default=MAX_PRICE_EUR,
+        help=(
+            "catalog discovery ceiling; buying rules remain unchanged "
+            f"(default: €{MAX_PRICE_EUR:.0f})"
+        ),
+    )
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument(
         "--model",
@@ -828,6 +964,8 @@ def main() -> int:
         parser.error("--pages must be positive and --per-page must be between 1 and 96")
     if args.batch_size < 1 or args.requests_per_minute < 1 or args.max_cost_usd <= 0:
         parser.error("--batch-size, --requests-per-minute, and --max-cost-usd must be positive")
+    if args.search_max_price < MAX_PRICE_EUR:
+        parser.error(f"--search-max-price must be at least €{MAX_PRICE_EUR:.0f}")
     try:
         store = ListingStore(args.database)
         if args.source == "live":
@@ -836,13 +974,17 @@ def main() -> int:
                 pages=args.pages,
                 per_page=args.per_page,
                 requests_per_minute=args.requests_per_minute,
+                search_max_price=args.search_max_price,
             )
         elif args.source == "file":
-            candidates = collect_from_file(args.input, store)
+            candidates = collect_from_file(
+                args.input, store, search_max_price=args.search_max_price
+            )
         else:
-            candidates = load_candidates(store.load_items())
-        candidates = apply_purchase_rules(candidates)
-        print(f"Purchase rules kept {len(candidates)} candidates", file=sys.stderr)
+            candidates = load_candidates(
+                store.load_items(), search_max_price=args.search_max_price
+            )
+        candidates = apply_purchase_rules(candidates, report=True)
         result = rank_candidates(
             candidates,
             api_key,
@@ -858,6 +1000,15 @@ def main() -> int:
             f"{len(result['review'])} review",
             file=sys.stderr,
         )
+        ntfy_topic = os.getenv("NTFY_TOPIC", "").strip()
+        if ntfy_topic:
+            notified_count = notify_new_deals(
+                ntfy_topic, result["accepted"], store
+            )
+            print(
+                f"ntfy: sent {notified_count} new accepted deal(s) to {ntfy_topic}",
+                file=sys.stderr,
+            )
     except (OSError, requests.RequestException, RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

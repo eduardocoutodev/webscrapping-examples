@@ -127,6 +127,12 @@ The live catalog and item-detail content is stored in `vinted_deals.sqlite3`.
 The AI-ranked export is written to `final-results.json`; progress is printed to
 the terminal while the run is active.
 
+When `NTFY_TOPIC` is set, up to three new accepted deals are posted to
+`https://ntfy.sh/` after ranking. Notification IDs are stored in
+`vinted_deals.sqlite3`, so the same listing is not sent twice. A failed publish
+is not saved and will be retried on the next run. No ntfy authentication or
+email forwarding is used.
+
 The ranking only keeps PS5 Disc listings from €280 to €400. Sellers must have
 at least one review and a rating of 3 stars or higher. Each result includes its
 `console_type` (`slim_disc` or `fat_disc`) and the matching `deal` tier.
@@ -142,3 +148,7 @@ parameters and price caps, and enable OpenRouter response healing. Use
 `--debug-llm` to save raw model responses under `llm-debug/` when diagnosing a
 provider response. The model research and cost comparison is cached in
 `plan/research-openrouter-models.md`.
+
+Use `--search-max-price 500` to inspect a wider catalog while testing. This only
+changes discovery: real accepted deals still follow the Slim €400 and Fat €350
+ceilings above.
